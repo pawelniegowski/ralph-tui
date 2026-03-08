@@ -959,10 +959,11 @@ export class ExecutionEngine {
     // Build prompt (includes recent progress context + tracker-owned template)
     const prompt = await buildPrompt(task, this.config, this.tracker ?? undefined);
 
-    // Build agent flags
+    // Build agent flags (per-task model overrides global config)
     const flags: string[] = [];
-    if (this.config.model) {
-      flags.push('--model', this.config.model);
+    const effectiveModel = task.model || this.config.model;
+    if (effectiveModel) {
+      flags.push('--model', effectiveModel);
     }
 
     // Check if agent declares subagent tracing support (used for agent-specific flags)

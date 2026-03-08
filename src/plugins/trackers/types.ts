@@ -68,6 +68,9 @@ export interface TrackerTask {
 
   /** Tracker-specific metadata (varies by plugin) */
   metadata?: Record<string, unknown>;
+
+  /** Optional model override for this task (e.g., "sonnet", "opus") */
+  model?: string;
 }
 
 /**

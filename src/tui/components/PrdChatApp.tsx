@@ -191,6 +191,21 @@ Optional fields for userStory:
 6. NO "estimated_hours" or time estimates - not supported
 7. NO nested structures like "phases" or "migration_strategy"
 
+## MERGING WITH EXISTING prd.json
+
+IMPORTANT: Before writing, check if tasks/prd.json already exists.
+
+If it exists:
+1. Read the existing file and parse its userStories array
+2. Find the highest existing ID number across ALL prefixes (e.g., if existing IDs are US-001, AR-008, SH-006, the highest number is 8)
+3. Renumber ALL new stories starting from that highest number + 1, using a new prefix derived from the PRD name (e.g., "Fix Shadows" → "FS-009", "FS-010", ...)
+4. Update all dependsOn references within the new stories to use the renumbered IDs
+5. Append the renumbered stories to the existing userStories array
+6. Preserve ALL existing stories exactly as they are (including passes: true, completionNotes, etc.)
+7. Write the merged result back
+
+If it does NOT exist, create it fresh with stories starting at US-001.
+
 ## OUTPUT
 
 Save the file to: tasks/prd.json

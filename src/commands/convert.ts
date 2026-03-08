@@ -497,20 +497,6 @@ async function executeJsonConversion(
   const outputPath = output ? resolve(output) : resolve('./prd.json');
 
   // Check if output file exists
-  if (await fileExists(outputPath)) {
-    if (!force) {
-      console.log();
-      const overwrite = await promptBoolean(`Output file exists: ${outputPath}. Overwrite?`, {
-        default: false,
-      });
-
-      if (!overwrite) {
-        printInfo('Conversion cancelled');
-        process.exit(0);
-      }
-    }
-  }
-
   const generatedPrd = parsedPrdToGeneratedPrd(parsed, branchName);
 
   // Compute relative path from output directory to input PRD
@@ -539,11 +525,69 @@ async function executeJsonConversion(
     // Directory may already exist
   }
 
+  // Merge with existing prd.json if it exists (with ID renumbering)
+  let mergedJson = prdJson;
+  let mergedCount = 0;
+  if (await fileExists(outputPath)) {
+    try {
+      const existingContent = await readFile(outputPath, 'utf-8');
+      const existingJson = JSON.parse(existingContent);
+      if (existingJson.userStories && Array.isArray(existingJson.userStories)) {
+        // Find highest numeric suffix across all existing IDs
+        let maxNum = 0;
+        for (const s of existingJson.userStories) {
+          const match = (s.id as string).match(/(\d+)$/);
+          if (match) {
+            maxNum = Math.max(maxNum, parseInt(match[1], 10));
+          }
+        }
+
+        // Derive a prefix from the new PRD name (e.g., "Fix Shadows" → "FS")
+        const words = (prdJson.name || 'NEW').split(/[\s_-]+/).filter(Boolean);
+        const prefix = words.length >= 2
+          ? (words[0][0] + words[1][0]).toUpperCase()
+          : words[0].substring(0, 2).toUpperCase();
+
+        // Build old→new ID mapping and renumber
+        const idMap = new Map<string, string>();
+        let nextNum = maxNum + 1;
+        for (const story of prdJson.userStories) {
+          const newId = `${prefix}-${String(nextNum).padStart(3, '0')}`;
+          idMap.set(story.id, newId);
+          nextNum++;
+        }
+
+        // Apply renumbering to stories and their dependsOn references
+        const renumberedStories = prdJson.userStories.map((story: Record<string, unknown>) => ({
+          ...story,
+          id: idMap.get(story.id as string) ?? story.id,
+          dependsOn: Array.isArray(story.dependsOn)
+            ? story.dependsOn.map((dep: string) => idMap.get(dep) ?? dep)
+            : story.dependsOn,
+        }));
+
+        mergedCount = renumberedStories.length;
+        mergedJson = {
+          ...existingJson,
+          userStories: [...existingJson.userStories, ...renumberedStories],
+          metadata: {
+            ...existingJson.metadata,
+            updatedAt: new Date().toISOString(),
+          },
+        };
+        printInfo(`Merging ${mergedCount} new stories (${prefix}-${String(maxNum + 1).padStart(3, '0')}..${prefix}-${String(nextNum - 1).padStart(3, '0')}) into existing ${existingJson.userStories.length} stories`);
+      }
+    } catch {
+      // If existing file can't be parsed, overwrite it
+      printInfo('Existing file could not be parsed, overwriting');
+    }
+  }
+
   // Write output file
   console.log();
   printInfo(`Writing: ${outputPath}`);
   try {
-    await writeFile(outputPath, JSON.stringify(prdJson, null, 2), 'utf-8');
+    await writeFile(outputPath, JSON.stringify(mergedJson, null, 2), 'utf-8');
   } catch (err) {
     printError(`Failed to write output file: ${err instanceof Error ? err.message : String(err)}`);
     process.exit(1);
@@ -555,7 +599,10 @@ async function executeJsonConversion(
   console.log();
   console.log('Summary:');
   console.log(`  PRD: ${parsed.name}`);
-  console.log(`  Stories: ${parsed.userStories.length}`);
+  console.log(`  New stories: ${prdJson.userStories.length}`);
+  if (mergedCount > 0) {
+    console.log(`  Merged: ${mergedCount} new into existing file`);
+  }
   console.log(`  Branch: ${branchName}`);
   console.log(`  Output: ${outputPath}`);
   console.log();

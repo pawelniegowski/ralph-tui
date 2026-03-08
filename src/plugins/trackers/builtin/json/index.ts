@@ -53,6 +53,9 @@ interface PrdUserStory {
 
   /** Optional notes for when the story was completed (alias for notes) */
   completionNotes?: string;
+
+  /** Optional model override for this story (e.g., "sonnet", "opus") */
+  model?: string;
 }
 
 /**
@@ -284,6 +287,7 @@ function storyToTask(story: PrdUserStory, parentName?: string): TrackerTask {
     type: 'story',
     parentId: parentName,
     dependsOn: story.dependsOn,
+    model: story.model,
     metadata: {
       acceptanceCriteria: story.acceptanceCriteria,
       notes: notes,

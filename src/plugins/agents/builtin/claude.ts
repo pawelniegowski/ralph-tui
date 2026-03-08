@@ -297,9 +297,10 @@ export class ClaudeAgentPlugin extends BaseAgentPlugin {
     }
     // Default (printMode === 'text'): no --output-format flag, uses plain text streaming
 
-    // Add model if specified (from config or passed in options)
+    // Add model if specified (from config), but not if already set via flags
+    // (per-task model override comes through options.flags and must take precedence)
     const modelToUse = this.model;
-    if (modelToUse) {
+    if (modelToUse && !(options?.flags ?? []).includes('--model')) {
       args.push('--model', modelToUse);
     }
 
