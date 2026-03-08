@@ -237,7 +237,8 @@ Each story's acceptance criteria should include:
 4. **Priority**: Based on dependency order (1 = highest)
 5. **dependsOn**: Array of story IDs this story requires
 6. **All stories**: `passes: false` and empty `notes`
-7. **branchName**: Derive from feature name, kebab-case, prefixed with `ralph/`
+7. **model**: Optional per-task model override. Use `"sonnet"` for simple/mechanical tasks (one-liner fixes, comment changes, removing dead code, simple refactors). Use `"opus"` for complex tasks (architecture changes, multi-file refactors, algorithm design, deep codebase understanding). Omit for medium-complexity tasks.
+8. **branchName**: Derive from feature name, kebab-case, prefixed with `ralph/`
 8. **Acceptance criteria**: Story criteria + quality gates appended
 9. **UI stories**: Also append UI-specific gates (browser verification)
 

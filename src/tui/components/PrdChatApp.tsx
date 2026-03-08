@@ -180,6 +180,7 @@ Optional fields for userStory:
 - "priority": number (1 = highest)
 - "labels": array of strings
 - "notes": string
+- "model": string - AI model override for this task. Use "sonnet" for simple/mechanical tasks (one-liner fixes, comment changes, simple refactors). Use "opus" for complex tasks (architecture, multi-file refactors, algorithm design). Omit for medium tasks (uses global default).
 
 ## VALIDATION RULES
 
