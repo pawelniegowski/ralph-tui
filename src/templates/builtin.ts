@@ -314,6 +314,93 @@ When finished (or if already complete), signal completion with:
 `;
 
 /**
+ * Markdown tracker template - structured for markdown task files.
+ * Each task file has description, implementation plan, and testing plan sections.
+ * Context-first structure: PRD → Patterns → Task → Workflow
+ */
+export const MARKDOWN_TEMPLATE = `{{!-- Full PRD for project context (agent studies this first) --}}
+{{#if prdContent}}
+## PRD Context
+### Progress: {{prdCompletedCount}}/{{prdTotalCount}} tasks complete
+
+<details>
+<summary>All Task Files (click to expand)</summary>
+
+{{prdContent}}
+
+</details>
+{{/if}}
+
+{{!-- Learnings from previous iterations (patterns first) --}}
+{{#if codebasePatterns}}
+## Codebase Patterns (Study These First)
+{{codebasePatterns}}
+{{/if}}
+
+{{!-- Task details --}}
+## Your Task: {{taskId}} - {{taskTitle}}
+
+{{#if taskDescription}}
+### Description
+{{taskDescription}}
+{{/if}}
+
+{{#if implementationPlan}}
+### Implementation Plan
+{{implementationPlan}}
+{{/if}}
+
+{{#if testingPlan}}
+### Testing Plan
+{{testingPlan}}
+{{/if}}
+
+{{#if notes}}
+### Notes
+{{notes}}
+{{/if}}
+
+{{#if recentProgress}}
+## Recent Progress
+{{recentProgress}}
+{{/if}}
+
+## Workflow
+1. Study the task description and implementation plan above
+2. Study \`.ralph-tui/progress.md\` to understand overall status, implementation progress, and learnings including codebase patterns and gotchas
+3. Implement following the implementation plan
+4. Verify using the testing plan
+5. Run quality checks: typecheck, lint, etc.
+{{#if config.autoCommit}}
+6. Do NOT create git commits. Changes will be committed automatically by the engine after task completion.
+{{else}}
+6. Do NOT create git commits. Leave all changes uncommitted for manual review.
+{{/if}}
+7. Document learnings (see below)
+8. Signal completion
+
+## Before Completing
+APPEND to \`.ralph-tui/progress.md\`:
+\\\`\\\`\\\`
+## [Date] - {{taskId}}
+- What was implemented
+- Files changed
+- **Learnings:**
+  - Patterns discovered
+  - Gotchas encountered
+---
+\\\`\\\`\\\`
+
+If you discovered a **reusable pattern**, also add it to the \\\`## Codebase Patterns\\\` section at the TOP of progress.md.
+
+## Stop Condition
+**IMPORTANT**: If the work is already complete (implemented in a previous iteration or already exists), verify it meets the requirements and signal completion immediately.
+
+When finished (or if already complete), signal completion with:
+<promise>COMPLETE</promise>
+`;
+
+/**
  * JSON (prd.json) tracker template - structured for PRD user stories.
  * Context-first structure: PRD → Patterns → Task → Workflow
  */

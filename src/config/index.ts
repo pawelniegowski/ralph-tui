@@ -6,7 +6,7 @@
 
 import { homedir } from "node:os";
 import { join, dirname, resolve } from "node:path";
-import { readFile, access, constants, mkdir } from "node:fs/promises";
+import { readFile, access, constants, mkdir, stat } from "node:fs/promises";
 import { parse as parseToml, stringify as stringifyToml } from "smol-toml";
 import type {
   StoredConfig,
@@ -620,11 +620,25 @@ export async function buildConfig(
     return null;
   }
 
-  // Auto-switch to JSON tracker when --prd specified without explicit --tracker
-  // This allows `ralph-tui run --prd ./prd.json` to work without needing `--tracker json`
+  // Auto-switch tracker when --prd specified without explicit --tracker
+  // Directories and .md files → markdown tracker; .json files → json tracker
   if (options.prdPath && !options.tracker) {
     const registry = getTrackerRegistry();
-    if (registry.hasPlugin("json")) {
+    const prdStat = await stat(options.prdPath).catch(() => null);
+    const isDir = prdStat?.isDirectory();
+    const isMd = options.prdPath.endsWith('.md');
+
+    if ((isDir || isMd) && registry.hasPlugin('markdown')) {
+      trackerConfig = {
+        name: 'markdown',
+        plugin: 'markdown',
+        options: {},
+      };
+      // For single .md file, use parent dir as tasks directory
+      if (isMd && !isDir) {
+        options.prdPath = dirname(options.prdPath);
+      }
+    } else if (registry.hasPlugin("json")) {
       trackerConfig = {
         name: "json",
         plugin: "json",

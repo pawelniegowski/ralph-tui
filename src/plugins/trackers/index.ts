@@ -32,4 +32,5 @@ export {
   createJsonTracker,
   createBeadsTracker,
   createBeadsBvTracker,
+  createMarkdownTracker,
 } from './builtin/index.js';
