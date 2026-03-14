@@ -427,39 +427,47 @@ Your job is to verify the work is correct and fix any issues you find.
 
 ## Rules for CSS/Layout Changes
 If any changed files include CSS, HTML templates, or layout modifications, you MUST verify
-with programmatic DOM checks (e.g. \`rt.evaluate()\`) — do NOT rely on screenshot + vision alone.
-Vision models frequently miss overlap, spacing, and scoping issues that are obvious to humans.
+with programmatic DOM checks (e.g. \`rt.evaluate()\`) — do NOT rely on screenshots for individual checks.
+Screenshots are expensive (vision API round-trip). DOM checks are instant and more reliable.
+
+**Strategy: DOM checks first, ONE final screenshot.**
+- Use \`rt.evaluate()\` for ALL individual checks: computed styles, bounding boxes, element existence, class lists
+- Take only ONE screenshot at the very end as a final sanity check
+- Do NOT take screenshots per-check — that's the #1 cause of slow verification
 
 Specifically:
 - Check **computed styles** on changed selectors (padding, margin, display, position, width)
 - Check **bounding boxes** of elements that should not overlap (\`getBoundingClientRect()\`)
 - Verify styles are **scoped correctly** (not leaking to unrelated selectors)
-- Visual screenshot checks are supplementary confirmation, not primary evidence
+- Batch multiple DOM checks into a single \`rt.evaluate()\` call when possible
 
-Example — checking two elements don't overlap:
+Example — batching multiple checks in one evaluate call:
 \`\`\`python
 result = rt.evaluate("""
   (() => {
-    const a = document.querySelector('.buttons-container')?.getBoundingClientRect();
-    const b = document.querySelector('.sprite-image')?.getBoundingClientRect();
-    if (!a || !b) return { error: 'elements not found' };
-    const overlaps = !(a.right <= b.left || a.left >= b.right || a.bottom <= b.top || a.top >= b.bottom);
-    return { a_rect: {left: a.left, right: a.right}, b_rect: {left: b.left, right: b.right}, overlaps };
+    const header = document.querySelector('.header-row');
+    const btnA = document.querySelector('.buttons-container');
+    const btnB = document.querySelector('.sprite-image');
+    if (!header || !btnA || !btnB) return { error: 'elements not found' };
+    const aRect = btnA.getBoundingClientRect();
+    const bRect = btnB.getBoundingClientRect();
+    const overlaps = !(aRect.right <= bRect.left || aRect.left >= bRect.right || aRect.bottom <= bRect.top || aRect.top >= bRect.bottom);
+    const s = getComputedStyle(header);
+    return {
+      overlaps,
+      headerPadding: s.paddingRight,
+      headerDisplay: s.display,
+      btnAWidth: aRect.width,
+    };
   })()
 """)
-# overlaps should be false
 \`\`\`
 
-Example — checking a computed style:
+Then take ONE final screenshot to confirm overall appearance. Crop to the relevant area and ask a specific question:
 \`\`\`python
-result = rt.evaluate("""
-  (() => {
-    const el = document.querySelector('.header-row');
-    if (!el) return { error: 'not found' };
-    const s = getComputedStyle(el);
-    return { paddingRight: s.paddingRight, display: s.display };
-  })()
-""")
+# Use region=(x, y, w, h) or quadrant="center"|"top-left"|etc. to crop
+shot = rt.screenshot(region=(0, 0, 800, 200))  # just the header area
+rt.ask("Are the action buttons dark-themed and right-aligned next to the hero name?", screenshot=shot)
 \`\`\`
 
 {{#if codebasePatterns}}
