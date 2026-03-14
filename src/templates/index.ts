@@ -34,4 +34,5 @@ export {
   BEADS_TEMPLATE,
   BEADS_BV_TEMPLATE,
   JSON_TEMPLATE,
+  VERIFICATION_TEMPLATE,
 } from './builtin.js';

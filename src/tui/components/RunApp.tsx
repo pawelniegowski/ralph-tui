@@ -2319,7 +2319,7 @@ export function RunApp({
               onStart();
             } else if (status === 'stopped' || status === 'idle' || status === 'complete') {
               // Continue after stop (or after completion with new tasks) - use engine.continueExecution()
-              if (currentIteration >= maxIterations) {
+              if (maxIterations > 0 && currentIteration >= maxIterations) {
                 // At max iterations, add one more then continue
                 engine.addIterations(1).then((shouldContinue) => {
                   if (shouldContinue) {

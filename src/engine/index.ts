@@ -59,12 +59,21 @@ import { saveIterationLog, buildSubagentTrace, getRecentProgressSummary, getCode
 import { performAutoCommit } from './auto-commit.js';
 import type { AgentSwitchEntry } from '../logs/index.js';
 import { renderPrompt } from '../templates/index.js';
+import { VERIFICATION_TEMPLATE } from '../templates/builtin.js';
 import { appendWithCharLimit as appendWithSharedCharLimit } from '../utils/buffer-limits.js';
+import { execFile } from 'node:child_process';
+import Handlebars from 'handlebars';
 
 /**
  * Pattern to detect completion signal in agent output
  */
 const PROMISE_COMPLETE_PATTERN = /<promise>\s*COMPLETE\s*<\/promise>/i;
+
+/**
+ * Pattern to detect verification signals in agent output.
+ */
+const PROMISE_VERIFIED_PATTERN = /<promise>\s*VERIFIED\s*<\/promise>/i;
+const PROMISE_FIXED_PATTERN = /<promise>\s*FIXED\s*<\/promise>/i;
 
 /**
  * Timeout for primary agent recovery test (5 seconds).
@@ -195,6 +204,82 @@ async function buildPrompt(
   lines.push('<promise>COMPLETE</promise>');
 
   return lines.join('\n');
+}
+
+/**
+ * Get the list of changed files in the working directory using git.
+ */
+async function getChangedFiles(cwd: string): Promise<string> {
+  return new Promise((resolve) => {
+    execFile('git', ['diff', '--name-only', 'HEAD'], { cwd }, (error, stdout) => {
+      if (error) {
+        // Also try unstaged + untracked
+        execFile('git', ['status', '--porcelain'], { cwd }, (_err, statusOut) => {
+          if (_err || !statusOut.trim()) {
+            resolve('(unable to determine changed files)');
+          } else {
+            const files = statusOut
+              .split('\n')
+              .filter(Boolean)
+              .map((line) => line.slice(3).trim())
+              .join('\n');
+            resolve(files || '(no files changed)');
+          }
+        });
+        return;
+      }
+      resolve(stdout.trim() || '(no files changed)');
+    });
+  });
+}
+
+/**
+ * Extract a brief summary from the agent's stdout output.
+ * Takes the last ~2000 characters to capture the agent's final status.
+ */
+function extractAgentSummary(stdout: string): string {
+  if (!stdout) return '(no output captured)';
+
+  // Take the tail of the output — the agent's final messages are most informative
+  const maxChars = 2000;
+  const trimmed = stdout.length > maxChars
+    ? `...\n${stdout.slice(-maxChars)}`
+    : stdout;
+  return trimmed;
+}
+
+/**
+ * Build a verification prompt for a fresh agent to verify completed work.
+ * Uses VERIFICATION_TEMPLATE with task context and first agent's summary.
+ */
+async function buildVerificationPrompt(
+  task: TrackerTask,
+  config: RalphConfig,
+  agentStdout: string,
+): Promise<string> {
+  const codebasePatterns = await getCodebasePatternsForPrompt(config.cwd);
+  const filesChanged = await getChangedFiles(config.cwd);
+  const previousAgentSummary = extractAgentSummary(agentStdout);
+
+  const compiled = Handlebars.compile(VERIFICATION_TEMPLATE, {
+    noEscape: true,
+    strict: false,
+  });
+
+  const context = {
+    taskId: task.id,
+    taskTitle: task.title,
+    taskDescription: task.description ?? '',
+    testingPlan: (task.metadata?.testingPlan as string) ?? '',
+    previousAgentSummary,
+    filesChanged,
+    codebasePatterns,
+    config: {
+      autoCommit: config.autoCommit,
+    },
+  };
+
+  return compiled(context).trim();
 }
 
 /**
@@ -1198,7 +1283,7 @@ export class ExecutionEngine {
       this.currentExecution = handle;
 
       // Wait for completion
-      const agentResult = await handle.promise;
+      let agentResult = await handle.promise;
       this.currentExecution = null;
 
       // Flush any remaining buffered JSONL data for Droid agent
@@ -1308,7 +1393,24 @@ export class ExecutionEngine {
       // Exit code 0 alone does NOT indicate task completion - an agent may exit
       // cleanly after asking clarification questions or hitting a blocker.
       // See: https://github.com/subsy/ralph-tui/issues/259
-      const taskCompleted = promiseComplete;
+      let taskCompleted = promiseComplete;
+
+      // Run verification agent if task has verify: true and agent signaled completion
+      if (taskCompleted && task.metadata?.verify) {
+        const verifyResult = await this.runVerification(task, agentResult, iteration);
+        if (verifyResult.outcome === 'verified' || verifyResult.outcome === 'fixed') {
+          // Verification passed — proceed with completion as normal
+          taskCompleted = true;
+        } else {
+          // Verification failed — do NOT mark task complete
+          taskCompleted = false;
+        }
+        // Merge verification stdout into agent result so iteration log and TUI history include it
+        agentResult = {
+          ...agentResult,
+          stdout: agentResult.stdout + '\n━━━ Verification Agent ━━━\n' + verifyResult.stdout,
+        };
+      }
 
       // Update tracker if task completed
       // In worker mode (forcedTask set), skip tracker update — the ParallelExecutor
@@ -2200,6 +2302,127 @@ export class ExecutionEngine {
 
   /**
    * Perform auto-commit after successful task completion.
+   * Run a verification agent after a task agent signals completion.
+   * Returns 'verified' if work is correct, 'fixed' if verifier fixed issues,
+   * or 'failed' if verification could not confirm correctness.
+   */
+  private async runVerification(
+    task: TrackerTask,
+    agentResult: AgentExecutionResult,
+    iteration: number,
+  ): Promise<{ outcome: 'verified' | 'fixed' | 'failed'; stdout: string }> {
+    // Build the verification prompt (fresh context, no implementation plan)
+    const verifyPrompt = await buildVerificationPrompt(
+      task,
+      this.config,
+      agentResult.stdout,
+    );
+
+    // Use same model as the task agent
+    const flags: string[] = [];
+    const effectiveModel = task.model || this.config.model;
+    if (effectiveModel) {
+      flags.push('--model', effectiveModel);
+    }
+
+    // Emit output header so TUI shows verification is happening
+    const verifyHeader = '\n━━━ Verification Agent Started ━━━\n';
+    this.state.currentOutput = appendWithCharLimit(
+      this.state.currentOutput,
+      verifyHeader,
+      MAX_ENGINE_LIVE_STREAM_CHARS
+    );
+    this.emit({
+      type: 'agent:output',
+      timestamp: new Date().toISOString(),
+      stream: 'stdout',
+      data: verifyHeader,
+      taskId: task.id,
+      iteration,
+    });
+
+    // Execute verification agent (fresh conversation — no --resume)
+    const handle = this.agent!.execute(verifyPrompt, [], {
+      cwd: this.config.cwd,
+      flags,
+      sandbox: this.config.sandbox,
+      subagentTracing: this.agent!.meta.supportsSubagentTracing,
+      onStdout: (data) => {
+        this.state.currentOutput = appendWithCharLimit(
+          this.state.currentOutput,
+          data,
+          MAX_ENGINE_LIVE_STREAM_CHARS
+        );
+        this.emit({
+          type: 'agent:output',
+          timestamp: new Date().toISOString(),
+          stream: 'stdout',
+          data,
+          taskId: task.id,
+          iteration,
+        });
+      },
+      onStderr: (data) => {
+        this.state.currentStderr = appendWithCharLimit(
+          this.state.currentStderr,
+          data,
+          MAX_ENGINE_LIVE_STREAM_CHARS
+        );
+        this.emit({
+          type: 'agent:output',
+          timestamp: new Date().toISOString(),
+          stream: 'stderr',
+          data,
+          taskId: task.id,
+          iteration,
+        });
+      },
+    });
+
+    // Store the handle so interrupts can cancel the verification agent too
+    this.currentExecution = handle;
+
+    const verifyResult = await handle.promise;
+
+    // Save verification output as a separate iteration log
+    await saveIterationLog(this.config.cwd, {
+      iteration,
+      status: 'completed',
+      task,
+      taskCompleted: false,
+      promiseComplete: false,
+      durationMs: 0,
+      startedAt: new Date().toISOString(),
+      endedAt: new Date().toISOString(),
+    }, verifyResult.stdout, verifyResult.stderr ?? '', {
+      config: this.config,
+      sessionId: this.config.sessionId,
+      logSuffix: '_verify',
+    });
+
+    // Check verification signals
+    if (PROMISE_VERIFIED_PATTERN.test(verifyResult.stdout)) {
+      const banner = '\n━━━ Verification: VERIFIED ✓ ━━━\n';
+      this.state.currentOutput = appendWithCharLimit(this.state.currentOutput, banner, MAX_ENGINE_LIVE_STREAM_CHARS);
+      this.emit({ type: 'agent:output', timestamp: new Date().toISOString(), stream: 'stdout', data: banner, taskId: task.id, iteration });
+      return { outcome: 'verified', stdout: verifyResult.stdout };
+    }
+
+    if (PROMISE_FIXED_PATTERN.test(verifyResult.stdout)) {
+      const banner = '\n━━━ Verification: FIXED ✓ ━━━\n';
+      this.state.currentOutput = appendWithCharLimit(this.state.currentOutput, banner, MAX_ENGINE_LIVE_STREAM_CHARS);
+      this.emit({ type: 'agent:output', timestamp: new Date().toISOString(), stream: 'stdout', data: banner, taskId: task.id, iteration });
+      return { outcome: 'fixed', stdout: verifyResult.stdout };
+    }
+
+    // Neither signal found — verification failed
+    const banner = '\n━━━ Verification: FAILED ✗ ━━━\n';
+    this.state.currentOutput = appendWithCharLimit(this.state.currentOutput, banner, MAX_ENGINE_LIVE_STREAM_CHARS);
+    this.emit({ type: 'agent:output', timestamp: new Date().toISOString(), stream: 'stdout', data: banner, taskId: task.id, iteration });
+    return { outcome: 'failed', stdout: verifyResult.stdout };
+  }
+
+  /**
    * Emits task:auto-committed on success, task:auto-commit-failed on error.
    * Failures never halt engine execution.
    */

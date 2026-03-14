@@ -401,6 +401,90 @@ When finished (or if already complete), signal completion with:
 `;
 
 /**
+ * Verification template - used by the verification agent after a task agent signals completion.
+ * A fresh agent uses this to independently verify the work and fix issues.
+ */
+export const VERIFICATION_TEMPLATE = `## Verification Task: {{taskId}} - {{taskTitle}}
+
+You are a **verification agent**. A previous agent attempted this task and signaled completion.
+Your job is to verify the work is correct and fix any issues you find.
+
+### Task Description
+{{#if taskDescription}}
+{{taskDescription}}
+{{/if}}
+
+{{#if testingPlan}}
+### Testing Plan (YOU MUST EXECUTE EVERY STEP)
+{{testingPlan}}
+{{/if}}
+
+### What the previous agent reported doing
+{{previousAgentSummary}}
+
+### Files changed
+{{filesChanged}}
+
+## Rules for CSS/Layout Changes
+If any changed files include CSS, HTML templates, or layout modifications, you MUST verify
+with programmatic DOM checks (e.g. \`rt.evaluate()\`) — do NOT rely on screenshot + vision alone.
+Vision models frequently miss overlap, spacing, and scoping issues that are obvious to humans.
+
+Specifically:
+- Check **computed styles** on changed selectors (padding, margin, display, position, width)
+- Check **bounding boxes** of elements that should not overlap (\`getBoundingClientRect()\`)
+- Verify styles are **scoped correctly** (not leaking to unrelated selectors)
+- Visual screenshot checks are supplementary confirmation, not primary evidence
+
+Example — checking two elements don't overlap:
+\`\`\`python
+result = rt.evaluate("""
+  (() => {
+    const a = document.querySelector('.buttons-container')?.getBoundingClientRect();
+    const b = document.querySelector('.sprite-image')?.getBoundingClientRect();
+    if (!a || !b) return { error: 'elements not found' };
+    const overlaps = !(a.right <= b.left || a.left >= b.right || a.bottom <= b.top || a.top >= b.bottom);
+    return { a_rect: {left: a.left, right: a.right}, b_rect: {left: b.left, right: b.right}, overlaps };
+  })()
+""")
+# overlaps should be false
+\`\`\`
+
+Example — checking a computed style:
+\`\`\`python
+result = rt.evaluate("""
+  (() => {
+    const el = document.querySelector('.header-row');
+    if (!el) return { error: 'not found' };
+    const s = getComputedStyle(el);
+    return { paddingRight: s.paddingRight, display: s.display };
+  })()
+""")
+\`\`\`
+
+{{#if codebasePatterns}}
+## Codebase Patterns
+{{codebasePatterns}}
+{{/if}}
+
+## Workflow
+1. Read the changed files to understand what was done
+2. Execute EVERY item in the testing plan above — do not skip any
+3. If all checks pass: signal <promise>VERIFIED</promise>
+4. If you find issues: fix them, then re-verify, then signal <promise>FIXED</promise>
+5. If issues are unfixable: describe what's wrong. Do NOT signal completion.
+
+{{#if config.autoCommit}}
+**Do NOT create git commits.** Changes will be committed automatically by the engine after verification passes.
+{{else}}
+**Do NOT create git commits.** Leave all changes uncommitted for manual review.
+{{/if}}
+
+**IMPORTANT**: You are a fresh agent with no prior context. Do not trust the previous agent's
+assessment. Verify independently.
+`;
+
+/**
  * JSON (prd.json) tracker template - structured for PRD user stories.
  * Context-first structure: PRD → Patterns → Task → Workflow
  */

@@ -28,6 +28,7 @@ interface TaskFrontmatter {
   passes: boolean;
   priority: number;
   model: string;
+  verify: boolean;
 }
 
 /**
@@ -55,6 +56,7 @@ const FRONTMATTER_DEFAULTS: Omit<TaskFrontmatter, 'id'> = {
   passes: false,
   priority: 5,
   model: 'opus',
+  verify: true,
 };
 
 /**
@@ -82,6 +84,7 @@ function parseTaskFile(content: string, filePath: string): ParsedTaskFile {
     passes: typeof rawFrontmatter.passes === 'boolean' ? rawFrontmatter.passes : FRONTMATTER_DEFAULTS.passes,
     priority: typeof rawFrontmatter.priority === 'number' ? rawFrontmatter.priority : FRONTMATTER_DEFAULTS.priority,
     model: typeof rawFrontmatter.model === 'string' ? rawFrontmatter.model : FRONTMATTER_DEFAULTS.model,
+    verify: typeof rawFrontmatter.verify === 'boolean' ? rawFrontmatter.verify : FRONTMATTER_DEFAULTS.verify,
   };
 
   // Extract title from first H1
@@ -143,7 +146,8 @@ function frontmatterNeedsDefaults(raw: Record<string, unknown>): boolean {
     typeof raw.id !== 'string' ||
     typeof raw.passes !== 'boolean' ||
     typeof raw.priority !== 'number' ||
-    typeof raw.model !== 'string'
+    typeof raw.model !== 'string' ||
+    typeof raw.verify !== 'boolean'
   );
 }
 
@@ -185,6 +189,7 @@ function parsedToTask(parsed: ParsedTaskFile): TrackerTask {
       filePath: parsed.filePath,
       implementationPlan: parsed.implementationPlan,
       testingPlan: parsed.testingPlan,
+      verify: parsed.frontmatter.verify,
     },
   };
 }

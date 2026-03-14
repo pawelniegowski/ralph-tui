@@ -651,6 +651,12 @@ export interface SaveIterationLogOptions {
    * When provided, saveIterationLog streams from this file instead of the stderr string argument.
    */
   rawStderrFilePath?: string;
+
+  /**
+   * Optional suffix appended to the log filename (before .log extension).
+   * Used to distinguish verification logs from normal iteration logs.
+   */
+  logSuffix?: string;
 }
 
 /**
@@ -681,6 +687,7 @@ export async function saveIterationLog(
   let resolvedSandboxMode: Exclude<SandboxMode, 'auto'> | undefined;
   let rawStdoutFilePath: string | undefined;
   let rawStderrFilePath: string | undefined;
+  let logSuffix: string | undefined;
 
   // Detect new options object format by checking for any of its unique keys
   const isOptionsObject = options && (
@@ -690,7 +697,8 @@ export async function saveIterationLog(
     'resolvedSandboxMode' in options ||
     'sessionId' in options ||
     'rawStdoutFilePath' in options ||
-    'rawStderrFilePath' in options
+    'rawStderrFilePath' in options ||
+    'logSuffix' in options
   );
 
   if (isOptionsObject) {
@@ -706,6 +714,7 @@ export async function saveIterationLog(
     resolvedSandboxMode = saveOptions.resolvedSandboxMode;
     rawStdoutFilePath = saveOptions.rawStdoutFilePath;
     rawStderrFilePath = saveOptions.rawStderrFilePath;
+    logSuffix = saveOptions.logSuffix;
   } else {
     // Old config-only signature for backward compatibility
     config = options as Partial<RalphConfig> | undefined;
@@ -723,7 +732,10 @@ export async function saveIterationLog(
     resolvedSandboxMode,
   });
   // Generate filename with new format if sessionId available, else legacy format
-  const filename = generateLogFilename(result.iteration, result.task.id, sessionId, result.startedAt);
+  const baseFilename = generateLogFilename(result.iteration, result.task.id, sessionId, result.startedAt);
+  const filename = logSuffix
+    ? baseFilename.replace(/\.log$/, `${logSuffix}.log`)
+    : baseFilename;
   const filePath = join(getIterationsDir(cwd, outputDir), filename);
 
   // If raw stream files are provided, stream log content directly from files.
